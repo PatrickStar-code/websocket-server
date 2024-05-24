@@ -1,19 +1,38 @@
 const WebSocket = require('ws');
+const sqlite3 = require('sqlite3').verbose();
+const { v4: uuidv4 } = require('uuid');
 
-const server = new WebSocket.Server({ port: 8080 });
+// Configurar o banco de dados SQLite persistente
+const db = new sqlite3.Database('chat.db');
 
-server.on('connection', (socket) => {
-  console.log('Client connected');
+db.serialize(() => {
+  db.run("CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, username TEXT, textmessage TEXT)");
+});
 
-  socket.on('message', (message) => {
-    console.log(`Received: ${message}`);
-    // Echo the message back to the client
-    socket.send(`You said: ${message}`);
+// Configurar o servidor WebSocket
+const wss = new WebSocket.Server({ port: 8080 });
+
+wss.on('connection', (ws) => {
+  ws.on('message', (message) => {
+    const data = JSON.parse(message);
+    const id = uuidv4();
+
+    db.run("INSERT INTO messages (id, username, textmessage) VALUES (?, ?, ?)", [id, data.username, data.textmessage], (err) => {
+      if (err) {
+        return console.error(err.message);
+      }
+      console.log(`Message inserted with ID: ${id}`);
+    });
+
+    // Broadcast the message to all connected clients
+    wss.clients.forEach((client) => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ id, username: data.username, textmessage: data.textmessage }));
+      }
+    });
   });
 
-  socket.on('close', () => {
-    console.log('Client disconnected');
-  });
+  ws.send(JSON.stringify({ message: 'Welcome to the chat!' }));
 });
 
 console.log('WebSocket server is running on ws://localhost:8080');
